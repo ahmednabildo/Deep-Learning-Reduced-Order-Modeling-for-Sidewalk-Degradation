@@ -32,71 +32,83 @@ The following figures are **saved outputs from [`Assignments_2.ipynb`](Assignmen
 | POD-NN inference for one 51-step trajectory    | **≈ 0.0043 s** (printed as 0.004 s)                      |
 | Reported per-trajectory speedup                | **≈ 1,878×** (against an assumed 8 s full-order runtime) |
 
-The relative errors use the notebook's $L^2$-based, trajectory-aggregated metric (Section 2). Results depend on the dataset, split, software environment, and trained weights.
+The relative errors use the notebook's $`L^2`$-based, trajectory-aggregated metric (Section 2). Results depend on the dataset, split, software environment, and trained weights.
 
 ## 1. Physical and numerical problem
 
-The model represents a **two-layer, unit-square sidewalk**. A $40 \times 40$ finite element mesh and a first-order, vector-valued continuous Galerkin space are constructed using the `dlroms` finite element interface and FEniCS [7, 8]. The interface between the layers is at a variable vertical position $\delta$.
+The model represents a **two-layer, unit-square sidewalk**. A $`40 \times 40`$ finite element mesh and a first-order, vector-valued continuous Galerkin space are constructed using the `dlroms` finite element interface and FEniCS [7, 8]. The interface between the layers is at a variable vertical position $`\delta`$.
 
-As stated in the notebook, the Lamé coefficients $\lambda$ and $\eta$ depend on the interface location through a step function in $y$ ($\eta$ is used so that it does not clash with the parameter vector $\mu$ below):
+As stated in the notebook, the Lamé coefficients $`\lambda`$ and $`\eta`$ depend on the interface location through a step function in $`y`$ ($`\eta`$ is used so that it does not clash with the parameter vector $`\mu`$ below):
 
 | Layer | Vertical region | Lamé coefficients (normalized) |
 | ----- | --------------- | ------------------------------ |
-| Upper | $y \ge \delta$  | $\lambda = \eta = 10$          |
-| Lower | $y < \delta$    | $\lambda = \eta = 50$          |
+| Upper | $`y \ge \delta`$  | $`\lambda = \eta = 10`$          |
+| Lower | $`y < \delta`$    | $`\lambda = \eta = 50`$          |
 
-The dataset uses two physical parameters, $\mu = (\delta, m)$, where $\delta$ is the **material-interface position** and $m$ controls the **magnitude of the pedestrian load** (the notebook's heatmap labels it "mass"). Time $t$ is a third input to the learned surrogate:
+The dataset uses two physical parameters, $`\mu = (\delta, m)`$, where $`\delta`$ is the **material-interface position** and $`m`$ controls the **magnitude of the pedestrian load** (the notebook's heatmap labels it "mass"). Time $`t`$ is a third input to the learned surrogate:
 
-$$(\delta, m, t) \;\longmapsto\; u(\delta, m, t) \quad \text{(full displacement field)}$$
+```math
+(\delta, m, t) \;\longmapsto\; u(\delta, m, t) \quad \text{(full displacement field)}
+```
 
-As described in the notebook's discussion, the load is purely vertical, $\mathbf{f}(t) = [0,\, -5m\sin(2\pi t)]^\top$, active during a loading phase $0 \le t \le 0.5$ and zero afterwards (relaxation phase), with $t$ normalized to $[0, 1]$.
+As described in the notebook's discussion, the load is purely vertical, $`\mathbf{f}(t) = [0,\, -5m\sin(2\pi t)]^\top`$, active during a loading phase $`0 \le t \le 0.5`$ and zero afterwards (relaxation phase), with $`t`$ normalized to $`[0, 1]`$.
 
 The notebook works with a supplied full-order dataset rather than generating all finite element trajectories itself. Its input tensors have shapes:
 
 - **Parameters:** `(100, 2)`
 - **Displacement trajectories:** `(100, 51, 3362)`
-- **Flattened surrogate inputs:** `(5100, 3)` for $(\delta, m, t)$
+- **Flattened surrogate inputs:** `(5100, 3)` for $`(\delta, m, t)`$
 - **Flattened full-order targets:** `(5100, 3362)`
 
-For the inverse search, the notebook scans $\delta \in [0.5, 0.9]$ and $m \in [0.5, 1.5]$.
+For the inverse search, the notebook scans $`\delta \in [0.5, 0.9]`$ and $`m \in [0.5, 1.5]`$.
 
 ### Why use data-driven ROMs?
 
 Projection-based POD–Galerkin relies on an affine decomposition of the operator,
 
-$$A(\mu) = \sum_q \theta_q(\mu)\, A_q,$$
+```math
+A(\mu) = \sum_q \theta_q(\mu)\, A_q,
+```
 
-with parameter-dependent scalars $\theta_q(\mu)$ and parameter-independent matrices $A_q$ assembled once offline. Here $\delta$ moves the interface *inside the integration domain*, so the matrices $A_1(\delta)$ (region $y \ge \delta$) and $A_2(\delta)$ (region $y < \delta$) change with every new $\delta$. The parametrization is **non-affine**, and POD–Galerkin would still have to reassemble the full stiffness matrix for every new $(\delta, m)$ unless additional treatment (for example hyper-reduction or empirical interpolation) is introduced.
+with parameter-dependent scalars $`\theta_q(\mu)`$ and parameter-independent matrices $`A_q`$ assembled once offline. Here $`\delta`$ moves the interface *inside the integration domain*, so the matrices $`A_1(\delta)`$ (region $`y \ge \delta`$) and $`A_2(\delta)`$ (region $`y < \delta`$) change with every new $`\delta`$. The parametrization is **non-affine**, and POD–Galerkin would still have to reassemble the full stiffness matrix for every new $`(\delta, m)`$ unless additional treatment (for example hyper-reduction or empirical interpolation) is introduced.
 
 This project instead learns the parameter-to-displacement relationship from snapshots, bypassing online finite element operator assembly [3, 4].
 
 ## 2. POD basis from simulation snapshots
 
-The first **75 trajectories**, containing $75 \times 51 = 3{,}825$ snapshots, are used for model training; the remaining **25 trajectories** (1,275 snapshots) are reserved for testing. The split is by trajectory index; the notebook does not shuffle.
+The first **75 trajectories**, containing $`75 \times 51 = 3{,}825`$ snapshots, are used for model training; the remaining **25 trajectories** (1,275 snapshots) are reserved for testing. The split is by trajectory index; the notebook does not shuffle.
 
 <!-- TODO: state whether the 100 parameter pairs in sidewalk.npz are randomly ordered. If they are sorted, a split by index could bias the test set (quick check: print(mu[:10])). -->
 
-Let $S_{\text{train}}$ contain the training displacement snapshots as columns. Singular Value Decomposition (SVD) gives [2]:
+Let $`S_{\text{train}}`$ contain the training displacement snapshots as columns. Singular Value Decomposition (SVD) gives [2]:
 
-$$S_{\text{train}} = U\,\Sigma\,W^\top, \qquad V = U_{:,\,1:N}, \quad N = 30$$
+```math
+S_{\text{train}} = U\,\Sigma\,W^\top, \qquad V = U_{:,\,1:N}, \quad N = 30
+```
 
-The first $N = 30$ left singular vectors define the POD basis $V$. $N$ was chosen from the decay of the singular values and the cumulative captured energy
+The first $`N = 30`$ left singular vectors define the POD basis $`V`$. $`N`$ was chosen from the decay of the singular values and the cumulative captured energy
 
-$$E_N = \frac{\sum_{i=1}^{N}\sigma_i^2}{\sum_{i}\sigma_i^2}$$
+```math
+E_N = \frac{\sum_{i=1}^{N}\sigma_i^2}{\sum_{i}\sigma_i^2}
+```
 
 The notebook reports **99.99998%** captured snapshot energy and **0.09%** POD reconstruction error on the training snapshots. The compressed representation of a displacement vector is
 
-$$c = V^\top u, \qquad u \approx V c$$
+```math
+c = V^\top u, \qquad u \approx V c
+```
 
-**Error metric.** The notebook's relative error is computed per trajectory as the ratio of time-summed $L^2$ norms (finite element $L^2$ norm, via `dlroms`) and then averaged over trajectories.
+**Error metric.** The notebook's relative error is computed per trajectory as the ratio of time-summed $`L^2`$ norms (finite element $`L^2`$ norm, via `dlroms`) and then averaged over trajectories.
 
-**Note on the two numbers.** For the plain Euclidean norm, the relative reconstruction error over the whole snapshot set equals $\sqrt{1 - E_N}$, which here is about 0.045%. The reported 0.09% is larger because it uses the $L^2$ (mass-matrix) norm and the per-trajectory aggregation above, whereas $E_N$ comes directly from the Euclidean SVD. The two figures are therefore not expected to match exactly.
+**Note on the two numbers.** For the plain Euclidean norm, the relative reconstruction error over the whole snapshot set equals $`\sqrt{1 - E_N}`$, which here is about 0.045%. The reported 0.09% is larger because it uses the $`L^2`$ (mass-matrix) norm and the per-trajectory aggregation above, whereas $`E_N`$ comes directly from the Euclidean SVD. The two figures are therefore not expected to match exactly.
 
 ## 3. POD-NN: neural prediction of POD coefficients
 
 Instead of solving a reduced Galerkin system, a neural network predicts the 30 POD coordinates directly:
 
-$$\hat u(\delta, m, t) = V\,\hat c(\delta, m, t), \qquad \hat c = \mathcal{N}_\theta(\delta, m, t) \in \mathbb{R}^{30}$$
+```math
+\hat u(\delta, m, t) = V\,\hat c(\delta, m, t), \qquad \hat c = \mathcal{N}_\theta(\delta, m, t) \in \mathbb{R}^{30}
+```
 
 The implemented architecture consists of:
 
@@ -109,16 +121,20 @@ After the last stage the coefficient-space relative error (the training metric) 
 
 ## 4. DL-ROM: nonlinear latent representation
 
-The notebook also tests an autoencoder-based DL-ROM [4]. Instead of relying on a fixed POD basis, a neural encoder maps the 3,362-dimensional full-order displacement to a **five-dimensional latent space** ($2p + 1$ with $p = 2$ parameters):
+The notebook also tests an autoencoder-based DL-ROM [4]. Instead of relying on a fixed POD basis, a neural encoder maps the 3,362-dimensional full-order displacement to a **five-dimensional latent space** ($`2p + 1`$ with $`p = 2`$ parameters):
 
-$$u \in \mathbb{R}^{3362} \;\xrightarrow{\text{encoder}}\; z \in \mathbb{R}^{5} \;\xrightarrow{\text{decoder}}\; \hat u \in \mathbb{R}^{3362}$$
+```math
+u \in \mathbb{R}^{3362} \;\xrightarrow{\text{encoder}}\; z \in \mathbb{R}^{5} \;\xrightarrow{\text{decoder}}\; \hat u \in \mathbb{R}^{3362}
+```
 
-- **Encoder:** $3362 \to 256 \to 64 \to 5$ (GELU).
-- **Decoder:** $5 \to 64 \to 256 \to 512 \to 1024 \to 3362$ (GELU, linear output).
+- **Encoder:** $`3362 \to 256 \to 64 \to 5`$ (GELU).
+- **Decoder:** $`5 \to 64 \to 256 \to 512 \to 1024 \to 3362`$ (GELU, linear output).
 
-A separate network learns $(\delta, m, t) \mapsto z$ (time Fourier features with 30 modes, one hidden layer of 500 units, linear output). The resulting prediction is
+A separate network learns $`(\delta, m, t) \mapsto z`$ (time Fourier features with 30 modes, one hidden layer of 500 units, linear output). The resulting prediction is
 
-$$\hat z = \mathcal{P}_\phi(\delta, m, t), \qquad \hat u = \text{decoder}(\hat z)$$
+```math
+\hat z = \mathcal{P}_\phi(\delta, m, t), \qquad \hat u = \text{decoder}(\hat z)
+```
 
 Training uses Adam with batch size 128. The autoencoder is trained in two stages (1,500 epochs at 1e−3, then 500 epochs at 1e−4); the parameter-to-latent network is subsequently trained in two stages (1,500 epochs at 1e−3, then 50 epochs at 1e−4). The recorded full DL-ROM test error is **3.91%**.
 
@@ -132,43 +148,45 @@ For the POD-NN, the notebook splits the test error into three parts, using sums 
 
 | Component                                                                  | Value  |
 | -------------------------------------------------------------------------- | ------ |
-| **Projection error:** $\lVert u - VV^\top u \rVert^2$ (information lost by the 30-mode POD space) | 0.0016 |
-| **Coefficient-prediction error:** $\lVert V^\top u - \hat c \rVert^2$ (network error)           | 0.5012 |
-| **Total field-prediction error:** $\lVert u - V\hat c \rVert^2$                                  | 0.5027 |
+| **Projection error:** $`\lVert u - VV^\top u \rVert^2`$ (information lost by the 30-mode POD space) | 0.0016 |
+| **Coefficient-prediction error:** $`\lVert V^\top u - \hat c \rVert^2`$ (network error)           | 0.5012 |
+| **Total field-prediction error:** $`\lVert u - V\hat c \rVert^2`$                                  | 0.5027 |
 
-Because $V$ has orthonormal columns, the total is the sum of the other two, and more than 99% of it comes from the network's coefficient prediction, not from the POD truncation. Improving the POD-NN therefore means improving the regression, not adding modes.
+Because $`V`$ has orthonormal columns, the total is the sum of the other two, and more than 99% of it comes from the network's coefficient prediction, not from the POD truncation. Improving the POD-NN therefore means improving the regression, not adding modes.
 
-For a sample **51-step trajectory**, the notebook prints a POD-NN evaluation time of 0.004 s (≈ 0.0043 s, consistent with the reported ratio). The **≈ 1,878× speedup** is calculated by comparing that runtime with a **hard-coded 8-second FOM reference** ($8\,\text{s} / 0.0043\,\text{s} \approx 1{,}878$), rather than timing the FOM in the same benchmark cell. The surrogate is timed with a single call on the GPU, without warm-up or explicit synchronization. It should therefore be treated as an illustrative speedup, not a controlled performance benchmark.
+For a sample **51-step trajectory**, the notebook prints a POD-NN evaluation time of 0.004 s (≈ 0.0043 s, consistent with the reported ratio). The **≈ 1,878× speedup** is calculated by comparing that runtime with a **hard-coded 8-second FOM reference** ($`8\,\text{s} / 0.0043\,\text{s} \approx 1{,}878`$), rather than timing the FOM in the same benchmark cell. The surrogate is timed with a single call on the GPU, without warm-up or explicit synchronization. It should therefore be treated as an illustrative speedup, not a controlled performance benchmark.
 
 ## 6. Inverse problem: recovering unknown physical parameters
 
-The last part of the project uses the trained POD-NN model to estimate material and loading parameters from six observations of **average vertical deformation on the top boundary**, taken at the time indices $0, 10, 20, 30, 40, 50$ (normalized times $0, 0.2, \dots, 1$). The measurements (`surface_measurements.npy`) are supplied with the assignment; their noise level is not documented in the notebook.
+The last part of the project uses the trained POD-NN model to estimate material and loading parameters from six observations of **average vertical deformation on the top boundary**, taken at the time indices $`0, 10, 20, 30, 40, 50`$ (normalized times $`0, 0.2, \dots, 1`$). The measurements (`surface_measurements.npy`) are supplied with the assignment; their noise level is not documented in the notebook.
 
-Let $Q(u)$ extract those six observation values from a full trajectory, and let $y_{\text{obs}}$ denote the supplied measurements ($\lVert y_{\text{obs}} \rVert_2 \approx 0.127$). The inverse problem is formulated as a grid search:
+Let $`Q(u)`$ extract those six observation values from a full trajectory, and let $`y_{\text{obs}}`$ denote the supplied measurements ($`\lVert y_{\text{obs}} \rVert_2 \approx 0.127`$). The inverse problem is formulated as a grid search:
 
-$$(\delta^*, m^*) = \arg\min_{(\delta,\, m)} \left\| Q\big(\hat u(\delta, m, \cdot)\big) - y_{\text{obs}} \right\|_2$$
+```math
+(\delta^*, m^*) = \arg\min_{(\delta,\, m)} \left\| Q\big(\hat u(\delta, m, \cdot)\big) - y_{\text{obs}} \right\|_2
+```
 
-Here, $\hat u(\delta, m, \cdot)$ denotes the **entire predicted time trajectory** for that parameter pair.
+Here, $`\hat u(\delta, m, \cdot)`$ denotes the **entire predicted time trajectory** for that parameter pair.
 
-The notebook evaluates a **$40 \times 40$ parameter grid (1,600 pairs)** over $\delta \in [0.5, 0.9]$ and $m \in [0.5, 1.5]$ and plots the mismatch surface. The grid spacings are $\Delta\delta = 0.4/39 \approx 0.010$ and $\Delta m = 1/39 \approx 0.026$.
+The notebook evaluates a **$`40 \times 40`$ parameter grid (1,600 pairs)** over $`\delta \in [0.5, 0.9]`$ and $`m \in [0.5, 1.5]`$ and plots the mismatch surface. The grid spacings are $`\Delta\delta = 0.4/39 \approx 0.010`$ and $`\Delta m = 1/39 \approx 0.026`$.
 
 | Inverse-search result              | Notebook value                           |
 | ---------------------------------- | ---------------------------------------- |
-| Estimated interface position, $\delta^*$ | **≈ 0.777** (grid node 27 of 0–39) |
-| Estimated load parameter, $m^*$    | **≈ 1.32** (grid node 32 of 0–39)        |
+| Estimated interface position, $`\delta^*`$ | **≈ 0.777** (grid node 27 of 0–39) |
+| Estimated load parameter, $`m^*`$    | **≈ 1.32** (grid node 32 of 0–39)        |
 | Minimum mismatch norm              | **≈ 0.022**                              |
 | Relative mismatch                  | **17.34%**                               |
 
-Because the search is on a grid, $\delta^*$ and $m^*$ are only resolved to within the grid spacing above.
+Because the search is on a grid, $`\delta^*`$ and $`m^*`$ are only resolved to within the grid spacing above.
 
 Two effects should be kept apart when reading these results:
 
-1. **Weak identifiability.** The mismatch heatmap shows a diagonal valley in the $(\delta, m)$ plane. This is physically plausible: a larger load on a stiffer sidewalk (larger $\delta$ means more of the stiff lower layer) can give nearly the same average surface deformation as a smaller load on a softer one. The six observations alone therefore cannot uniquely identify both parameters.
-2. **Non-zero residual at the minimum.** The relative mismatch at the best grid point is 17.34% (about 0.009 per observation, RMS), far above the 1.91% field-level test error. The notebook attributes this to the ROM error accumulating in $Q$, and states that refining the grid to $80 \times 80$ gave no change (that refinement is not part of the saved notebook). The notebook does not separate ROM error in $Q$ from measurement noise or model mismatch, so the cause of the residual is open.
+1. **Weak identifiability.** The mismatch heatmap shows a diagonal valley in the $`(\delta, m)`$ plane. This is physically plausible: a larger load on a stiffer sidewalk (larger $`\delta`$ means more of the stiff lower layer) can give nearly the same average surface deformation as a smaller load on a softer one. The six observations alone therefore cannot uniquely identify both parameters.
+2. **Non-zero residual at the minimum.** The relative mismatch at the best grid point is 17.34% (about 0.009 per observation, RMS), far above the 1.91% field-level test error. The notebook attributes this to the ROM error accumulating in $`Q`$, and states that refining the grid to $`80 \times 80`$ gave no change (that refinement is not part of the saved notebook). The notebook does not separate ROM error in $`Q`$ from measurement noise or model mismatch, so the cause of the residual is open.
 
 <!-- TODO: once the two checks suggested for the notebook are run (ROM error on Q for test trajectories; synthetic inverse test), replace the last sentence of item 2 with the result. -->
 
-The notebook discusses possible improvements: measuring the horizontal displacement $u_x$, concentrating measurements in the relaxation phase ($t > 0.5$), and using more observation times. These are **proposals**, not validated improvements in the current code. Inverse identification from limited, noisy observations is a general inverse-problem challenge [6].
+The notebook discusses possible improvements: measuring the horizontal displacement $`u_x`$, concentrating measurements in the relaxation phase ($`t > 0.5`$), and using more observation times. These are **proposals**, not validated improvements in the current code. Inverse identification from limited, noisy observations is a general inverse-problem challenge [6].
 
 ## 7. Repository structure
 
