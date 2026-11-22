@@ -37,25 +37,16 @@ The model represents a **two-layer, unit-square sidewalk**. A 40 × 40 finite el
 
 As stated in the notebook, the Lamé coefficients depend on the interface location:
 
-$$
-\lambda(x,y)=\eta(x,y)=
-\begin{cases}
-10, & y\geq\delta,\\
-50, & y<\delta.
-\end{cases}
-$$
+| Layer | Vertical region | Lamé coefficients (normalized) |
+| --- | --- | --- |
+| Upper | `y ≥ δ` | `λ = η = 10` |
+| Lower | `y < δ` | `λ = η = 50` |
 
-The dataset is parameterized by
+The dataset uses two physical parameters, **`μ = (δ, m)`**, where **`δ` is the material-interface position** and **`m` controls the magnitude of the pedestrian load**. Time `t` is a third input to the learned surrogate:
 
-$$
-\boldsymbol{\mu}=(\delta,m),
-$$
-
-where **`δ` is the material-interface position** and **`m` controls the magnitude of the pedestrian load**. Time `t` is a third input to the learned surrogate:
-
-$$
-(\delta,m,t)\longmapsto\mathbf{u}(\delta,m,t).
-$$
+```text
+(delta, m, t)  -->  u(delta, m, t)  [full displacement field]
+```
 
 The notebook works with a supplied full-order dataset rather than generating all finite element trajectories itself. Its input tensors have shapes:
 
@@ -78,31 +69,39 @@ The first **75 trajectories**, containing `75 × 51 = 3,825` snapshots, are used
 
 Let `S_train` contain the training displacement snapshots as columns. Singular Value Decomposition (SVD) gives [2]:
 
-$$
-S_{\mathrm{train}}=U\Sigma W^\top.
-$$
+```text
+S_train = U · Σ · Wᵀ
+```
 
 The first `N = 30` left singular vectors define the POD basis `V`. Its captured-energy ratio is
 
-$$
-E_N=\frac{\sum_{i=1}^{N}\sigma_i^2}{\sum_i\sigma_i^2}.
-$$
+```text
+E_N = (σ₁² + σ₂² + ... + σ_N²) / (σ₁² + σ₂² + ...)
+```
 
 The notebook reports **99.99998%** captured snapshot energy and **0.09%** POD reconstruction error on the training snapshots. The compressed representation of a displacement vector is
 
-$$
-\mathbf{c}=V^\top\mathbf{u},\qquad
-\mathbf{u}\approx V\mathbf{c}.
-$$
+```text
+c = Vᵀ u             # Project a displacement onto the POD basis
+u_approx = V c       # Reconstruct the full displacement
+```
 
 ## 3. POD-NN: neural prediction of POD coefficients
 
 Instead of solving a reduced Galerkin system, a neural network predicts the 30 POD coordinates directly:
 
-$$
-(\delta,m,t)\xrightarrow{\;\mathrm{NN}\;}\hat{\mathbf{c}}
-\xrightarrow{\;V\;}\hat{\mathbf{u}}=V\hat{\mathbf{c}}.
-$$
+```text
+Input: (delta, m, t)
+        |
+        v
+   Neural network
+        |
+        v
+   c_hat (30 POD coefficients)
+        |
+        v
+   u_hat = V @ c_hat
+```
 
 The implemented architecture consists of:
 
@@ -117,18 +116,28 @@ The final notebook evaluation reports a **1.91%** average relative error on the 
 
 The notebook also tests an autoencoder-based DL-ROM [4]. Instead of relying on a fixed POD basis, a neural encoder maps the 3,362-dimensional full-order displacement to a **five-dimensional latent space**:
 
-$$
-\mathbf{u}\xrightarrow{\mathrm{encoder}}\mathbf{z}\in\mathbb{R}^{5},
-\qquad
-\mathbf{z}\xrightarrow{\mathrm{decoder}}\hat{\mathbf{u}}.
-$$
+```text
+u (3,362 DOFs)
+     |
+     v
+   Encoder
+     |
+     v
+z (5 latent variables)
+     |
+     v
+   Decoder
+     |
+     v
+u_hat (3,362 DOFs)
+```
 
 A separate network learns `(δ, m, t) → z`, using time Fourier features. The resulting prediction is
 
-$$
-\hat{\mathbf{u}}(\delta,m,t)
-=\mathrm{decoder}\!\left(\mathrm{parameter\_net}(\delta,m,t)\right).
-$$
+```text
+z_hat = parameter_net(delta, m, t)
+u_hat = decoder(z_hat)
+```
 
 The autoencoder is trained in two stages (1,500 then 500 epochs); the parameter-to-latent network is subsequently trained in two stages (1,500 then 50 epochs). The recorded full DL-ROM test error is **3.91%**.
 
@@ -150,12 +159,12 @@ The last part of the project uses the trained POD-NN model to estimate material 
 
 Let `Q(u)` extract those six observation values from a full trajectory, and let `y_obs` denote the supplied measurements. The inverse problem is formulated as a grid search:
 
-$$
-(\delta^*,m^*)=
-\underset{\delta,m}{\operatorname{argmin}}
-\left\|Q\!\left(\hat{\mathbf{u}}(\delta,m)\right)
--\mathbf{y}_{\mathrm{obs}}\right\|_2.
-$$
+```text
+(delta*, m*) = argmin over (delta, m) of:
+               || Q(u_hat(delta, m)) - y_observed ||₂
+```
+
+Here, `u_hat(delta, m)` denotes the **entire predicted time trajectory** for that parameter pair.
 
 The notebook evaluates a **40 × 40 parameter grid (1,600 pairs)** over `δ ∈ [0.5, 0.9]` and `m ∈ [0.5, 1.5]` and plots the mismatch surface.
 
