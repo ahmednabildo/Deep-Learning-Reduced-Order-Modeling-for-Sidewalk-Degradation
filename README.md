@@ -202,14 +202,6 @@ The notebook visualizes the singular-value decay, training/test error histories,
 
 The initial notebook cell attempts to install `dlroms` from its upstream GitHub repository if import fails, using `pip install --no-deps`. That command **does not automatically install all dependent packages**, particularly compiled FEniCS dependencies.
 
-## 9. Limitations
-
-- The elastic-coefficient interface is parameter-dependent, but the supplied notebook does not regenerate the original FOM dataset or establish the physical loading units.
-- The dataset split follows the **first 75 trajectories for training and last 25 for testing**; no separate validation split or multiple random seeds are reported.
-- Captured POD energy is measured on the **training snapshots** and does not guarantee corresponding generalization error.
-- The recorded speedup uses an **assumed 8 s FOM runtime** and a single surrogate timing, not a repeated end-to-end benchmark.
-- The inverse search gives the **best sampled grid point** and has a relatively large **17.34%** observation mismatch. Confidence intervals, measurement-noise modeling, and global uniqueness are not established.
-- The notebook's late discussion mentions an 80 × 80 grid comparison, but the committed code visibly executes only the **40 × 40** grid search.
 
 ## References
 
